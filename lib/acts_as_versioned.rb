@@ -170,17 +170,19 @@ module ActiveRecord #:nodoc:
 
           cattr_accessor :versioned_class_name, :versioned_foreign_key, :versioned_table_name, :versioned_inheritance_column, 
             :version_column, :max_version_limit, :track_altered_attributes, :version_condition, :version_sequence_name, :non_versioned_columns,
-            :version_association_options, :version_if_changed
+            :version_association_options, :version_if_changed,
+            :versioned_columns_names
 
           self.versioned_class_name         = options[:class_name]  || "Version"
           self.versioned_foreign_key        = options[:foreign_key] || self.to_s.foreign_key
-          self.versioned_table_name         = options[:table_name]  || "#{table_name_prefix}#{base_class.name.underscore.gsub(/\//, '_')}_versions#{table_name_suffix}"
+          self.versioned_table_name         = options[:table_name]  || "#{table_name_prefix}#{base_class.name.demodulize.underscore}_versions#{table_name_suffix}"
           self.versioned_inheritance_column = options[:inheritance_column] || "versioned_#{inheritance_column}"
           self.version_column               = options[:version_column]     || 'version'
           self.version_sequence_name        = options[:sequence_name]
           self.max_version_limit            = options[:limit].to_i
           self.version_condition            = options[:if] || true
-          self.non_versioned_columns        = [self.primary_key, inheritance_column, self.version_column, 'lock_version', versioned_inheritance_column] + options[:non_versioned_columns].to_a.map(&:to_s)
+          self.non_versioned_columns        = [self.primary_key, inheritance_column, self.version_column, 'lock_version', versioned_inheritance_column] + Array(options[:non_versioned_columns]).map(&:to_s)
+          self.versioned_columns_names      = Array(options[:versioned_columns]).map(&:to_s)
           self.version_association_options  = {
                                                 :class_name  => "#{self.to_s}::#{versioned_class_name}",
                                                 :foreign_key => versioned_foreign_key,
@@ -394,7 +396,7 @@ module ActiveRecord #:nodoc:
         module ClassMethods
           # Returns an array of columns that are versioned.  See non_versioned_columns
           def versioned_columns
-            @versioned_columns ||= columns.select { |c| !non_versioned_columns.include?(c.name) }
+            @versioned_columns ||= columns.select { |c| (versioned_columns_names.empty? || versioned_columns_names.include?(c.name)) && !non_versioned_columns.include?(c.name) }
           end
 
           # Returns an instance of the dynamic versioned model
