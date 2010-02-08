@@ -1,6 +1,34 @@
-= acts_as_versioned
+= acts_as_versioned - Ubilabs Fork
+
+Added restore functionality for deleted versioned model by using a second column 
+to reference the versioned model. This column is no real foreign_key and survives 
+the destroy of the versioned model.
+
+E.g.:
+
+acts_as_versioned :association_options => {:dependent => :nullify}, :original_id_column=>"original_id"
+
+----
+
+foo.destroy
+deleted = Foo.find_latest_versions_of_deleted
+foo = restore(deleted.last)
+
+or:
+
+foo.destroy
+find_all_versions_by_deleted_id
+restore
+
+== Github
+
+http://github.com/ubilabs/acts_as_versioned
+
+= acts_as_versioned - Original
 
 This library adds simple versioning to an ActiveRecord module.  ActiveRecord is required.
+
+
 
 == Resources
 

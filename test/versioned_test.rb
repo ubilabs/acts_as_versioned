@@ -367,4 +367,45 @@ class VersionedTest < ActiveSupport::TestCase
     end
     assert ActiveRecord::Base.lock_optimistically
   end
+  
+  def test_deleted_finder
+    w1 = Widget.create! :name => 'new widget'
+    w1.update_attribute(:name, "changed name")
+    revision_ids = w1.versions.map(&:id)
+    w1.destroy
+    
+    w2 = Widget.create! :name => 'second widget'
+    w2.destroy
+    
+    # check if all versions for a deleted revisions are found
+    assert_equal [], revision_ids - Widget.find_all_versions_by_deleted_id(1).map(&:id)
+    
+    # check the deleted finder
+    assert_equal [2,3], Widget.find_latest_versions_of_deleted.map(&:id)  
+  end
+  
+  def test_restore
+    w1 = Widget.create! :name => 'new widget'
+    w1.update_attribute(:name, "changed name")
+    w1_latest_version = w1.versions.latest
+    w1_earliest_version = w1.versions.earliest
+    w1.destroy
+    
+    #check if the restored widget equals the last version of the destroyed
+    restored = Widget.restore(w1_latest_version)
+    assert_equal w1, restored
+    
+    # check if all the versions are assigned to the restored object
+    assert_equal 2, restored.versions.length
+    assert_equal 0, Widget.find_latest_versions_of_deleted.length
+    
+    #check if restoring a specific version is possible
+    restored.destroy
+    restored = Widget.restore(w1_earliest_version)
+    assert_equal w1_earliest_version.version, restored.version
+    
+    # check that a still existing widget cannot be restored
+    assert_equal false, Widget.restore(w1_earliest_version) 
+  end
+  
 end

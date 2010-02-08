@@ -81,6 +81,9 @@ module ActiveRecord #:nodoc:
         # * <tt>version_column</tt> - name of the column in the model that keeps the version number (default: version)
         # * <tt>sequence_name</tt> - name of the custom sequence to be used by the versioned model.
         # * <tt>limit</tt> - number of revisions to keep, defaults to unlimited
+        # * <tt>versioned_columns</tt> - array of columns to be versioned
+        # * <tt>original_id_column</tt> - name of the column for backuping the foreign key to relate to a deleted versioned model (default: original_id)
+        # * <tt>association_options</tt> - options for extending the association. This may be used for keeping versions of a destroyed versioned model (e.g :dependent=>:nullify)
         # * <tt>if</tt> - symbol of method to check before saving a new version.  If this method returns false, a new version is not saved.
         #   For finer control, pass either a Proc or modify Model#version_condition_met?
         #
@@ -171,7 +174,8 @@ module ActiveRecord #:nodoc:
           cattr_accessor :versioned_class_name, :versioned_foreign_key, :versioned_table_name, :versioned_inheritance_column, 
             :version_column, :max_version_limit, :track_altered_attributes, :version_condition, :version_sequence_name, :non_versioned_columns,
             :version_association_options, :version_if_changed,
-            :versioned_columns_names
+            :versioned_columns_names,
+            :original_id_column
 
           self.versioned_class_name         = options[:class_name]  || "Version"
           self.versioned_foreign_key        = options[:foreign_key] || self.to_s.foreign_key
@@ -183,6 +187,7 @@ module ActiveRecord #:nodoc:
           self.version_condition            = options[:if] || true
           self.non_versioned_columns        = [self.primary_key, inheritance_column, self.version_column, 'lock_version', versioned_inheritance_column] + Array(options[:non_versioned_columns]).map(&:to_s)
           self.versioned_columns_names      = Array(options[:versioned_columns]).map(&:to_s)
+          self.original_id_column           = options[:original_id_column]     || 'original_id'
           self.version_association_options  = {
                                                 :class_name  => "#{self.to_s}::#{versioned_class_name}",
                                                 :foreign_key => versioned_foreign_key,
@@ -275,6 +280,7 @@ module ActiveRecord #:nodoc:
             clone_versioned_model(self, rev)
             rev.send("#{self.class.version_column}=", send(self.class.version_column))
             rev.send("#{self.class.versioned_foreign_key}=", id)
+            rev.send("#{self.class.original_id_column}=", id)
             rev.save
           end
         end
@@ -417,6 +423,7 @@ module ActiveRecord #:nodoc:
             migrator.create_table(versioned_table_name, create_table_options) do |t|
               t.column versioned_foreign_key, :integer
               t.column version_column, :integer
+              t.column original_id_column, :integer
             end
 
             self.versioned_columns.each do |col|
@@ -436,6 +443,7 @@ module ActiveRecord #:nodoc:
             end
 
             self.connection.add_index versioned_table_name, versioned_foreign_key
+            self.connection.add_index versioned_table_name, original_id_column
           end
 
           # Rake migration task to drop the versioned table
@@ -480,6 +488,49 @@ module ActiveRecord #:nodoc:
               ActiveRecord::Base.lock_optimistically = true if current
             end
           end
+          
+          
+          # find versions for a deleted object
+          def find_all_versions_by_deleted_id(id)
+            versioned_class.find(:all, 
+              :conditions=>{versioned_foreign_key => nil, original_id_column =>id}, 
+              :order=>version_column)
+          end
+          
+          # returns the latest deleted version of all deleted_objects
+          def find_latest_versions_of_deleted
+            result = versioned_class.find_by_sql (
+              "SELECT * FROM (
+                SELECT original_id, MAX(version) AS latest_version FROM #{versioned_table_name} WHERE #{versioned_foreign_key} IS NULL GROUP BY original_id
+              ) AS grouped
+              INNER JOIN #{versioned_table_name} AS versions ON versions.original_id = grouped.original_id AND versions.version = grouped.latest_version"
+            )
+          end
+          
+          
+          # restores/undeletes a version of an object
+          # takes a version of a deleted object
+          # 
+          def restore(version)
+            
+            origin_id =  version.send(original_id_column)
+            
+            # return false if the original model still exists
+            # and therefore cannot be destroyed
+            return false if self.exists?(origin_id)
+            
+            restored = self.new
+            restored.clone_versioned_model(version, restored)
+            self.without_revision do
+              restored.send("#{self.version_column}=", version.send(self.version_column))
+              restored.send("id=", origin_id)
+              restored.save!
+              versioned_class.update_all("#{versioned_foreign_key} = #{origin_id}", "#{original_id_column} = #{origin_id}")
+            end
+            restored
+          end
+          
+          
         end
       end
     end

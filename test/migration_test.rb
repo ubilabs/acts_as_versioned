@@ -26,8 +26,15 @@ if ActiveRecord::Base.connection.supports_migrations?
       assert_raises(ActiveRecord::StatementInvalid) { Thing.create :title => 'blah blah' }
       # take 'er up
       ActiveRecord::Migrator.up(File.dirname(__FILE__) + '/fixtures/migrations/')
+      
+      #check if the original id column has been created
+      assert_equal :integer, Thing::Version.columns.find{|c| c.name == "original_id"}.type
+      
       t = Thing.create :title => 'blah blah', :price => 123.45, :type => 'Thing'
       assert_equal 1, t.versions.size
+      
+      # check that the original_id equals the original id
+      assert_equal t.id, t.versions.first.original_id
       
       # check that the price column has remembered its value correctly
       assert_equal t.price,  t.versions.first.price
